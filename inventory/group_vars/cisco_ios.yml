@@ -1,0 +1,7 @@
+---
+platform: cisco_ios
+enable_secret: "{{ lookup('env', 'ENABLE_SECRET') }}"
+ssh_version: 2
+ssh_timeout: 60
+exec_timeout: 10
+vty_acl: "VTY-ACCESS"

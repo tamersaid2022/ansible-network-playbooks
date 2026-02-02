@@ -1,0 +1,37 @@
+---
+- name: Enable password encryption
+  cisco.ios.ios_config:
+    lines:
+      - "service password-encryption"
+
+- name: Configure SSH version 2
+  cisco.ios.ios_config:
+    lines:
+      - "ip ssh version 2"
+      - "ip ssh time-out {{ ssh_timeout | default(60) }}"
+
+- name: Disable unnecessary services
+  cisco.ios.ios_config:
+    lines:
+      - "no ip http server"
+      - "no ip http secure-server"
+      - "no cdp run"
+      - "no ip source-route"
+      - "no service finger"
+      - "no service pad"
+      - "no ip bootp server"
+
+- name: Configure VTY security
+  cisco.ios.ios_config:
+    lines:
+      - "transport input ssh"
+      - "exec-timeout {{ exec_timeout | default(10) }} 0"
+      - "login local"
+    parents: "line vty 0 4"
+
+- name: Configure console security
+  cisco.ios.ios_config:
+    lines:
+      - "exec-timeout 5 0"
+      - "login local"
+    parents: "line con 0"

@@ -1,0 +1,19 @@
+---
+- name: Set hostname
+  cisco.ios.ios_config:
+    lines:
+      - "hostname {{ inventory_hostname }}"
+  when: ansible_network_os == 'cisco.ios.ios'
+
+- name: Configure DNS
+  cisco.ios.ios_config:
+    lines:
+      - "ip name-server {{ item }}"
+  loop: "{{ dns_servers }}"
+  when: ansible_network_os == 'cisco.ios.ios'
+
+- name: Configure domain name
+  cisco.ios.ios_config:
+    lines:
+      - "ip domain-name company.local"
+  when: ansible_network_os == 'cisco.ios.ios'

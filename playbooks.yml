@@ -1,0 +1,702 @@
+---
+# ============================================================================
+# Ansible Network Playbooks Collection
+# Author: Tamer Khalifa (CCIE #68867)
+# GitHub: https://github.com/tamersaid2022
+# ============================================================================
+#
+# This file contains all core playbooks in a single file for easy deployment.
+# Each playbook can be run using tags: ansible-playbook playbooks.yml --tags backup
+#
+# Available tags:
+#   - backup     : Backup device configurations
+#   - ntp        : Deploy NTP configuration
+#   - snmp       : Deploy SNMP configuration
+#   - syslog     : Deploy Syslog configuration
+#   - banner     : Deploy login banner
+#   - harden     : Security hardening
+#   - vlan       : VLAN management
+#   - health     : Health check
+#   - facts      : Gather device facts
+#
+# Usage Examples:
+#   ansible-playbook -i inventory.yml playbooks.yml --tags backup
+#   ansible-playbook -i inventory.yml playbooks.yml --tags ntp,snmp,syslog
+#   ansible-playbook -i inventory.yml playbooks.yml --tags harden -l cisco_ios
+#
+# ============================================================================
+
+
+# ============================================================================
+# SAMPLE INVENTORY (save as inventory.yml)
+# ============================================================================
+# all:
+#   vars:
+#     ansible_user: "{{ lookup('env', 'NETWORK_USER') | default('admin') }}"
+#     ansible_password: "{{ lookup('env', 'NETWORK_PASSWORD') }}"
+#     ansible_become: yes
+#     ansible_become_method: enable
+#     ansible_become_password: "{{ ansible_password }}"
+#   children:
+#     cisco_ios:
+#       hosts:
+#         router1:
+#           ansible_host: 192.168.1.1
+#         switch1:
+#           ansible_host: 192.168.1.10
+#       vars:
+#         ansible_network_os: cisco.ios.ios
+#         ansible_connection: ansible.netcommon.network_cli
+#     cisco_nxos:
+#       hosts:
+#         nexus1:
+#           ansible_host: 192.168.2.1
+#       vars:
+#         ansible_network_os: cisco.nxos.nxos
+#         ansible_connection: ansible.netcommon.network_cli
+# ============================================================================
+
+
+# ============================================================================
+# PLAYBOOK 1: BACKUP CONFIGURATIONS
+# ============================================================================
+- name: "BACKUP - Backup Network Device Configurations"
+  hosts: all
+  gather_facts: no
+  tags: [backup, config]
+  
+  vars:
+    backup_root: "./backups"
+    timestamp: "{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}"
+    
+  tasks:
+    - name: Create backup directory structure
+      delegate_to: localhost
+      run_once: false
+      ansible.builtin.file:
+        path: "{{ backup_root }}/{{ inventory_hostname }}"
+        state: directory
+        mode: '0755'
+        
+    - name: Backup Cisco IOS configuration
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.ios.ios'
+      cisco.ios.ios_config:
+        backup: yes
+        backup_options:
+          filename: "{{ inventory_hostname }}_{{ timestamp }}.cfg"
+          dir_path: "{{ backup_root }}/{{ inventory_hostname }}"
+      register: backup_result
+      
+    - name: Backup Cisco NXOS configuration
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.nxos.nxos'
+      cisco.nxos.nxos_config:
+        backup: yes
+        backup_options:
+          filename: "{{ inventory_hostname }}_{{ timestamp }}.cfg"
+          dir_path: "{{ backup_root }}/{{ inventory_hostname }}"
+      register: backup_result
+      
+    - name: Backup Arista EOS configuration
+      when: ansible_network_os is defined and ansible_network_os == 'arista.eos.eos'
+      arista.eos.eos_config:
+        backup: yes
+        backup_options:
+          filename: "{{ inventory_hostname }}_{{ timestamp }}.cfg"
+          dir_path: "{{ backup_root }}/{{ inventory_hostname }}"
+      register: backup_result
+      
+    - name: Display backup status
+      ansible.builtin.debug:
+        msg: "✅ Configuration backed up to {{ backup_root }}/{{ inventory_hostname }}/"
+
+
+# ============================================================================
+# PLAYBOOK 2: DEPLOY NTP CONFIGURATION
+# ============================================================================
+- name: "NTP - Configure Network Time Protocol"
+  hosts: all
+  gather_facts: no
+  tags: [ntp, baseline]
+  
+  vars:
+    ntp_servers:
+      - server: 10.10.10.1
+        prefer: true
+      - server: 10.10.10.2
+        prefer: false
+    ntp_timezone: "UTC"
+    
+  tasks:
+    - name: Configure NTP on Cisco IOS
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.ios.ios'
+      block:
+        - name: Remove existing NTP servers
+          cisco.ios.ios_config:
+            lines:
+              - "no ntp server {{ item.server }}"
+          loop: "{{ ntp_servers }}"
+          ignore_errors: yes
+          
+        - name: Configure NTP servers
+          cisco.ios.ios_config:
+            lines:
+              - "ntp server {{ item.server }}{{ ' prefer' if item.prefer else '' }}"
+          loop: "{{ ntp_servers }}"
+          
+        - name: Configure timezone
+          cisco.ios.ios_config:
+            lines:
+              - "clock timezone {{ ntp_timezone }} 0"
+          notify: save_ios_config
+          
+    - name: Configure NTP on Cisco NXOS
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.nxos.nxos'
+      block:
+        - name: Configure NTP servers on NXOS
+          cisco.nxos.nxos_config:
+            lines:
+              - "ntp server {{ item.server }}{{ ' prefer' if item.prefer else '' }}"
+          loop: "{{ ntp_servers }}"
+          notify: save_nxos_config
+          
+    - name: Display NTP configuration status
+      ansible.builtin.debug:
+        msg: "✅ NTP configured with servers: {{ ntp_servers | map(attribute='server') | list }}"
+        
+  handlers:
+    - name: save_ios_config
+      cisco.ios.ios_config:
+        save_when: modified
+        
+    - name: save_nxos_config
+      cisco.nxos.nxos_config:
+        save_when: modified
+
+
+# ============================================================================
+# PLAYBOOK 3: DEPLOY SNMP CONFIGURATION
+# ============================================================================
+- name: "SNMP - Configure Simple Network Management Protocol"
+  hosts: all
+  gather_facts: no
+  tags: [snmp, baseline, monitoring]
+  
+  vars:
+    snmp_community_ro: "{{ lookup('env', 'SNMP_RO_COMMUNITY') | default('public') }}"
+    snmp_community_rw: "{{ lookup('env', 'SNMP_RW_COMMUNITY') | default('private') }}"
+    snmp_location: "Data Center - Rack A1"
+    snmp_contact: "netops@company.com"
+    snmp_acl_name: "SNMP-ACCESS"
+    snmp_allowed_hosts:
+      - 10.10.20.0 0.0.0.255
+      
+  tasks:
+    - name: Configure SNMP on Cisco IOS
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.ios.ios'
+      block:
+        - name: Configure SNMP location and contact
+          cisco.ios.ios_config:
+            lines:
+              - "snmp-server location {{ snmp_location }}"
+              - "snmp-server contact {{ snmp_contact }}"
+              
+        - name: Create SNMP access ACL
+          cisco.ios.ios_config:
+            lines:
+              - "permit {{ item }}"
+            parents: "ip access-list standard {{ snmp_acl_name }}"
+          loop: "{{ snmp_allowed_hosts }}"
+          
+        - name: Configure SNMP communities with ACL
+          cisco.ios.ios_config:
+            lines:
+              - "snmp-server community {{ snmp_community_ro }} RO {{ snmp_acl_name }}"
+              - "snmp-server community {{ snmp_community_rw }} RW {{ snmp_acl_name }}"
+          no_log: true
+          
+        - name: Enable SNMP traps
+          cisco.ios.ios_config:
+            lines:
+              - snmp-server enable traps snmp authentication linkdown linkup coldstart warmstart
+              - snmp-server enable traps config
+              - snmp-server enable traps cpu threshold
+          notify: save_ios_config
+          
+    - name: Configure SNMP on Cisco NXOS
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.nxos.nxos'
+      block:
+        - name: Configure SNMP on NXOS
+          cisco.nxos.nxos_config:
+            lines:
+              - "snmp-server location {{ snmp_location }}"
+              - "snmp-server contact {{ snmp_contact }}"
+              - "snmp-server community {{ snmp_community_ro }} ro"
+          no_log: true
+          notify: save_nxos_config
+          
+    - name: Display SNMP configuration status
+      ansible.builtin.debug:
+        msg: "✅ SNMP configured - Location: {{ snmp_location }}"
+        
+  handlers:
+    - name: save_ios_config
+      cisco.ios.ios_config:
+        save_when: modified
+        
+    - name: save_nxos_config
+      cisco.nxos.nxos_config:
+        save_when: modified
+
+
+# ============================================================================
+# PLAYBOOK 4: DEPLOY SYSLOG CONFIGURATION
+# ============================================================================
+- name: "SYSLOG - Configure Logging Servers"
+  hosts: all
+  gather_facts: no
+  tags: [syslog, baseline, monitoring]
+  
+  vars:
+    syslog_servers:
+      - host: 10.10.20.1
+        level: informational
+      - host: 10.10.20.2
+        level: warnings
+    logging_buffer_size: 64000
+    logging_source_interface: "Loopback0"
+    
+  tasks:
+    - name: Configure Syslog on Cisco IOS
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.ios.ios'
+      block:
+        - name: Configure logging buffer
+          cisco.ios.ios_config:
+            lines:
+              - "logging buffered {{ logging_buffer_size }} informational"
+              - "logging console warnings"
+              - "service timestamps log datetime msec localtime show-timezone"
+              - "service timestamps debug datetime msec localtime show-timezone"
+              
+        - name: Configure syslog servers
+          cisco.ios.ios_config:
+            lines:
+              - "logging host {{ item.host }}"
+              - "logging trap {{ item.level }}"
+          loop: "{{ syslog_servers }}"
+          
+        - name: Configure logging source interface
+          cisco.ios.ios_config:
+            lines:
+              - "logging source-interface {{ logging_source_interface }}"
+          when: logging_source_interface is defined
+          ignore_errors: yes
+          notify: save_ios_config
+          
+    - name: Configure Syslog on Cisco NXOS
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.nxos.nxos'
+      block:
+        - name: Configure syslog on NXOS
+          cisco.nxos.nxos_config:
+            lines:
+              - "logging server {{ item.host }} {{ '5' if item.level == 'informational' else '4' }} use-vrf default"
+          loop: "{{ syslog_servers }}"
+          notify: save_nxos_config
+          
+    - name: Display Syslog configuration status
+      ansible.builtin.debug:
+        msg: "✅ Syslog configured - Servers: {{ syslog_servers | map(attribute='host') | list }}"
+        
+  handlers:
+    - name: save_ios_config
+      cisco.ios.ios_config:
+        save_when: modified
+        
+    - name: save_nxos_config
+      cisco.nxos.nxos_config:
+        save_when: modified
+
+
+# ============================================================================
+# PLAYBOOK 5: DEPLOY LOGIN BANNER
+# ============================================================================
+- name: "BANNER - Configure Login Banner"
+  hosts: all
+  gather_facts: no
+  tags: [banner, baseline, security]
+  
+  vars:
+    login_banner: |
+      **************************************************************************
+      *                        AUTHORIZED ACCESS ONLY                          *
+      *                                                                        *
+      *  This system is the property of COMPANY NAME. Unauthorized access is   *
+      *  strictly prohibited and will be prosecuted to the fullest extent of   *
+      *  applicable law. All activities are monitored and logged.              *
+      *                                                                        *
+      *  By accessing this system, you consent to monitoring and recording.    *
+      **************************************************************************
+    motd_banner: |
+      ====================================================================
+                    Welcome to {{ inventory_hostname }}
+      ====================================================================
+      
+  tasks:
+    - name: Configure banner on Cisco IOS
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.ios.ios'
+      block:
+        - name: Configure login banner
+          cisco.ios.ios_banner:
+            banner: login
+            text: "{{ login_banner }}"
+            state: present
+            
+        - name: Configure MOTD banner
+          cisco.ios.ios_banner:
+            banner: motd
+            text: "{{ motd_banner }}"
+            state: present
+          notify: save_ios_config
+          
+    - name: Configure banner on Cisco NXOS
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.nxos.nxos'
+      block:
+        - name: Configure banners on NXOS
+          cisco.nxos.nxos_banner:
+            banner: motd
+            text: "{{ login_banner }}"
+            state: present
+          notify: save_nxos_config
+          
+    - name: Display banner configuration status
+      ansible.builtin.debug:
+        msg: "✅ Login and MOTD banners configured"
+        
+  handlers:
+    - name: save_ios_config
+      cisco.ios.ios_config:
+        save_when: modified
+        
+    - name: save_nxos_config
+      cisco.nxos.nxos_config:
+        save_when: modified
+
+
+# ============================================================================
+# PLAYBOOK 6: SECURITY HARDENING
+# ============================================================================
+- name: "HARDEN - Apply Security Hardening"
+  hosts: all
+  gather_facts: no
+  tags: [harden, security]
+  
+  vars:
+    enable_secret: "{{ lookup('env', 'ENABLE_SECRET') | default('ChangeMe123!') }}"
+    ssh_version: 2
+    ssh_timeout: 60
+    exec_timeout_minutes: 10
+    vty_acl_name: "VTY-ACCESS"
+    vty_allowed_networks:
+      - 10.10.10.0 0.0.0.255
+      - 192.168.1.0 0.0.0.255
+      
+  tasks:
+    - name: Apply hardening to Cisco IOS
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.ios.ios'
+      block:
+        - name: Enable password encryption
+          cisco.ios.ios_config:
+            lines:
+              - service password-encryption
+              
+        - name: Configure enable secret
+          cisco.ios.ios_config:
+            lines:
+              - "enable secret {{ enable_secret }}"
+          no_log: true
+          
+        - name: Disable unnecessary services
+          cisco.ios.ios_config:
+            lines:
+              - no ip http server
+              - no ip http secure-server
+              - no cdp run
+              - no ip source-route
+              - no ip finger
+              - no service finger
+              - no ip bootp server
+              - no service tcp-small-servers
+              - no service udp-small-servers
+              - no service pad
+              - no ip domain-lookup
+              
+        - name: Configure SSH settings
+          cisco.ios.ios_config:
+            lines:
+              - "ip ssh version {{ ssh_version }}"
+              - "ip ssh time-out {{ ssh_timeout }}"
+              - ip ssh authentication-retries 3
+              
+        - name: Configure console line
+          cisco.ios.ios_config:
+            lines:
+              - "exec-timeout {{ exec_timeout_minutes }} 0"
+              - logging synchronous
+              - login local
+            parents: line console 0
+            
+        - name: Create VTY access ACL
+          cisco.ios.ios_config:
+            lines:
+              - "permit {{ item }}"
+            parents: "ip access-list standard {{ vty_acl_name }}"
+          loop: "{{ vty_allowed_networks }}"
+          
+        - name: Configure VTY lines
+          cisco.ios.ios_config:
+            lines:
+              - "access-class {{ vty_acl_name }} in"
+              - transport input ssh
+              - "exec-timeout {{ exec_timeout_minutes }} 0"
+              - logging synchronous
+              - login local
+            parents: line vty 0 15
+          notify: save_ios_config
+          
+    - name: Apply hardening to Cisco NXOS
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.nxos.nxos'
+      block:
+        - name: Configure security settings on NXOS
+          cisco.nxos.nxos_config:
+            lines:
+              - feature ssh
+              - no feature telnet
+              - ssh key rsa 2048
+          notify: save_nxos_config
+          
+    - name: Display hardening status
+      ansible.builtin.debug:
+        msg: |
+          ✅ Security hardening applied:
+             - Password encryption enabled
+             - SSH v{{ ssh_version }} configured
+             - Unnecessary services disabled
+             - VTY ACL configured
+             - Console/VTY timeout set to {{ exec_timeout_minutes }} minutes
+        
+  handlers:
+    - name: save_ios_config
+      cisco.ios.ios_config:
+        save_when: modified
+        
+    - name: save_nxos_config
+      cisco.nxos.nxos_config:
+        save_when: modified
+
+
+# ============================================================================
+# PLAYBOOK 7: VLAN MANAGEMENT
+# ============================================================================
+- name: "VLAN - Create/Manage VLANs"
+  hosts: all
+  gather_facts: no
+  tags: [vlan]
+  
+  vars:
+    vlans:
+      - vlan_id: 10
+        name: MANAGEMENT
+        state: present
+      - vlan_id: 20
+        name: SERVERS
+        state: present
+      - vlan_id: 30
+        name: USERS
+        state: present
+      - vlan_id: 99
+        name: NATIVE
+        state: present
+        
+  tasks:
+    - name: Configure VLANs on Cisco IOS
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.ios.ios'
+      cisco.ios.ios_vlans:
+        config:
+          - vlan_id: "{{ item.vlan_id }}"
+            name: "{{ item.name }}"
+            state: "{{ 'active' if item.state == 'present' else 'suspend' }}"
+        state: "{{ item.state | default('merged') }}"
+      loop: "{{ vlans }}"
+      notify: save_ios_config
+      
+    - name: Configure VLANs on Cisco NXOS
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.nxos.nxos'
+      cisco.nxos.nxos_vlans:
+        config:
+          - vlan_id: "{{ item.vlan_id }}"
+            name: "{{ item.name }}"
+            enabled: "{{ item.state == 'present' }}"
+        state: merged
+      loop: "{{ vlans }}"
+      notify: save_nxos_config
+      
+    - name: Display VLAN configuration status
+      ansible.builtin.debug:
+        msg: "✅ VLANs configured: {{ vlans | map(attribute='vlan_id') | list }}"
+        
+  handlers:
+    - name: save_ios_config
+      cisco.ios.ios_config:
+        save_when: modified
+        
+    - name: save_nxos_config
+      cisco.nxos.nxos_config:
+        save_when: modified
+
+
+# ============================================================================
+# PLAYBOOK 8: HEALTH CHECK
+# ============================================================================
+- name: "HEALTH - Run Device Health Check"
+  hosts: all
+  gather_facts: no
+  tags: [health, check]
+  
+  vars:
+    cpu_warning_threshold: 70
+    cpu_critical_threshold: 90
+    memory_warning_threshold: 75
+    memory_critical_threshold: 90
+    
+  tasks:
+    - name: Health check for Cisco IOS
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.ios.ios'
+      block:
+        - name: Get CPU utilization
+          cisco.ios.ios_command:
+            commands:
+              - show processes cpu | include CPU utilization
+          register: cpu_result
+          
+        - name: Get memory utilization
+          cisco.ios.ios_command:
+            commands:
+              - show memory statistics | include Processor
+          register: memory_result
+          
+        - name: Get interface status
+          cisco.ios.ios_command:
+            commands:
+              - show ip interface brief | exclude unassigned
+          register: interface_result
+          
+        - name: Get uptime
+          cisco.ios.ios_command:
+            commands:
+              - show version | include uptime
+          register: uptime_result
+          
+        - name: Get environment status
+          cisco.ios.ios_command:
+            commands:
+              - show environment all
+          register: env_result
+          ignore_errors: yes
+          
+        - name: Display health summary
+          ansible.builtin.debug:
+            msg: |
+              ═══════════════════════════════════════════════════════
+              HEALTH CHECK: {{ inventory_hostname }}
+              ═══════════════════════════════════════════════════════
+              UPTIME:
+              {{ uptime_result.stdout[0] | default('N/A') }}
+              
+              CPU:
+              {{ cpu_result.stdout[0] | default('N/A') }}
+              
+              MEMORY:
+              {{ memory_result.stdout[0] | default('N/A') }}
+              
+              INTERFACES:
+              {{ interface_result.stdout[0] | default('N/A') }}
+              ═══════════════════════════════════════════════════════
+              
+    - name: Health check for Cisco NXOS
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.nxos.nxos'
+      block:
+        - name: Get system resources
+          cisco.nxos.nxos_command:
+            commands:
+              - show system resources
+          register: resources_result
+          
+        - name: Display NXOS health summary
+          ansible.builtin.debug:
+            msg: |
+              ═══════════════════════════════════════════════════════
+              HEALTH CHECK: {{ inventory_hostname }}
+              ═══════════════════════════════════════════════════════
+              {{ resources_result.stdout[0] | default('N/A') }}
+              ═══════════════════════════════════════════════════════
+
+
+# ============================================================================
+# PLAYBOOK 9: GATHER FACTS
+# ============================================================================
+- name: "FACTS - Gather Device Facts"
+  hosts: all
+  gather_facts: no
+  tags: [facts, inventory]
+  
+  vars:
+    facts_output_dir: "./facts"
+    
+  tasks:
+    - name: Create facts output directory
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.file:
+        path: "{{ facts_output_dir }}"
+        state: directory
+        mode: '0755'
+        
+    - name: Gather Cisco IOS facts
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.ios.ios'
+      cisco.ios.ios_facts:
+        gather_subset:
+          - all
+      register: ios_facts
+      
+    - name: Gather Cisco NXOS facts
+      when: ansible_network_os is defined and ansible_network_os == 'cisco.nxos.nxos'
+      cisco.nxos.nxos_facts:
+        gather_subset:
+          - all
+      register: nxos_facts
+      
+    - name: Save facts to file
+      delegate_to: localhost
+      ansible.builtin.copy:
+        content: "{{ ansible_facts | to_nice_yaml }}"
+        dest: "{{ facts_output_dir }}/{{ inventory_hostname }}_facts.yml"
+        mode: '0644'
+        
+    - name: Display facts summary
+      ansible.builtin.debug:
+        msg: |
+          ═══════════════════════════════════════════════════════
+          DEVICE FACTS: {{ inventory_hostname }}
+          ═══════════════════════════════════════════════════════
+          Hostname:     {{ ansible_facts.net_hostname | default('N/A') }}
+          Model:        {{ ansible_facts.net_model | default('N/A') }}
+          Serial:       {{ ansible_facts.net_serialnum | default('N/A') }}
+          Version:      {{ ansible_facts.net_version | default('N/A') }}
+          Image:        {{ ansible_facts.net_image | default('N/A') }}
+          Interfaces:   {{ ansible_facts.net_interfaces | default({}) | length }}
+          ═══════════════════════════════════════════════════════
+          Facts saved to: {{ facts_output_dir }}/{{ inventory_hostname }}_facts.yml
+
+
+# ============================================================================
+# END OF PLAYBOOKS
+# ============================================================================

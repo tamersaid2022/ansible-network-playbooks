@@ -1,0 +1,17 @@
+---
+- name: Deploy Login Banner
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: Configure banner on IOS
+      cisco.ios.ios_banner:
+        banner: login
+        text: "{{ login_banner }}"
+        state: present
+      when: ansible_network_os == 'cisco.ios.ios'
+      notify: save_ios_config
+
+  handlers:
+    - name: save_ios_config
+      cisco.ios.ios_config:
+        save_when: modified

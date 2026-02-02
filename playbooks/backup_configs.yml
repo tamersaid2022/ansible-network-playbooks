@@ -1,0 +1,24 @@
+---
+- name: Backup Device Configurations
+  hosts: all
+  gather_facts: no
+  tasks:
+    - name: Create backup directory
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+      delegate_to: localhost
+
+    - name: Backup IOS config
+      cisco.ios.ios_config:
+        backup: yes
+        backup_options:
+          dir_path: "{{ backup_dir }}"
+      when: ansible_network_os == 'cisco.ios.ios'
+
+    - name: Backup NXOS config
+      cisco.nxos.nxos_config:
+        backup: yes
+        backup_options:
+          dir_path: "{{ backup_dir }}"
+      when: ansible_network_os == 'cisco.nxos.nxos'

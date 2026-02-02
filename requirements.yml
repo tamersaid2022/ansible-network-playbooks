@@ -1,0 +1,16 @@
+---
+collections:
+  - name: cisco.ios
+    version: ">=6.0.0"
+  - name: cisco.nxos
+    version: ">=5.0.0"
+  - name: cisco.asa
+    version: ">=4.0.0"
+  - name: junipernetworks.junos
+    version: ">=6.0.0"
+  - name: arista.eos
+    version: ">=7.0.0"
+  - name: ansible.netcommon
+    version: ">=6.0.0"
+  - name: ansible.utils
+    version: ">=3.0.0"

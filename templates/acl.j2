@@ -1,0 +1,5 @@
+ip access-list extended {{ vty_acl | default('VTY-ACCESS') }}
+{% for network in management_networks | default(['10.0.0.0 0.0.0.255']) %}
+ permit ip {{ network }} any
+{% endfor %}
+ deny ip any any log

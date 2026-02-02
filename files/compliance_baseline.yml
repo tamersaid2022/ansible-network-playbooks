@@ -1,0 +1,15 @@
+---
+baseline:
+  required_services:
+    - "service password-encryption"
+    - "service timestamps log datetime msec"
+  prohibited_services:
+    - "ip http server"
+    - "service finger"
+    - "service pad"
+  required_ssh:
+    version: 2
+    timeout: 60
+  required_logging:
+    buffered_size: 64000
+    console_level: warnings

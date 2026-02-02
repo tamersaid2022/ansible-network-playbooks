@@ -1,0 +1,5 @@
+---
+platform: juniper_junos
+root_auth_method: ssh-key
+ssh_protocol_version: v2
+commit_confirm_timeout: 5

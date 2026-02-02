@@ -1,0 +1,5 @@
+---
+platform: cisco_nxos
+feature_ssh: true
+feature_nxapi: false
+vpc_domain: 100

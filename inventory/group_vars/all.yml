@@ -1,0 +1,22 @@
+---
+ntp_servers:
+  - server: 10.10.10.1
+    prefer: true
+  - server: 10.10.10.2
+    prefer: false
+dns_servers:
+  - 8.8.8.8
+  - 8.8.4.4
+syslog_servers:
+  - host: 10.10.20.1
+    level: informational
+snmp:
+  community_ro: "{{ lookup('env', 'SNMP_RO_COMMUNITY') | default('public') }}"
+  location: "Data Center - Rack A1"
+  contact: "netops@company.com"
+login_banner: |
+  ******************************************************************
+  *                    AUTHORIZED ACCESS ONLY                      *
+  *  All activities are monitored and logged.                      *
+  ******************************************************************
+backup_dir: "./backups/{{ inventory_hostname }}"
